@@ -5,30 +5,18 @@ from PIL import Image
 import numpy as np
 
 # Page configuration
-st.set_page_config(page_title="PDF OCR Reader (Chinese)", layout="centered")
+st.set_page_config(page_title="PDF OCR Reader (Simplified Chinese)", layout="centered")
 
-st.title("📄 Scanned PDF OCR App (Chinese / English)")
-st.write("Upload a scanned PDF document and select your Chinese script type in the sidebar.")
+st.title("📄 Scanned PDF OCR App (Simplified Chinese)")
+st.write("Upload a scanned PDF document, and this app will automatically extract the text.")
 
-# Sidebar option to choose script
-script_choice = st.sidebar.selectbox(
-    "Select Chinese Script Type",
-    ["Simplified Chinese (简体中文)", "Traditional Chinese (繁體中文)"]
-)
-
-# Map choice to EasyOCR language code
-if "Simplified" in script_choice:
-    lang_code = 'ch_sim'
-else:
-    lang_code = 'ch_tra'
-
-# Load EasyOCR model dynamically based on selection (cached for performance)
+# Load EasyOCR model (Simplified Chinese + English)
 @st.cache_resource
-def load_ocr_reader(lang):
-    return easyocr.Reader([lang, 'en'])
+def load_ocr_reader():
+    return easyocr.Reader(['ch_sim', 'en'])
 
-with st.spinner(f"Loading OCR engine for {script_choice}... (This takes a moment on the first run)"):
-    reader = load_ocr_reader(lang_code)
+with st.spinner("Loading OCR engine... (This takes a minute on the first run)"):
+    reader = load_ocr_reader()
 
 # File uploader widget
 uploaded_file = st.file_uploader("Upload your PDF file", type=["pdf"])
@@ -52,7 +40,7 @@ if uploaded_file is not None:
         for page_num in range(total_pages):
             page = pdf_document[page_num]
             
-            # Convert PDF page to a high-resolution image (dpi=300 for sharp character strokes)
+            # Convert PDF page to a high-resolution image (dpi=300 for sharp character clarity)
             pix = page.get_pixmap(dpi=300)
             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
             
