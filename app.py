@@ -5,18 +5,30 @@ from PIL import Image
 import numpy as np
 
 # Page configuration
-st.set_page_config(page_title="PDF OCR Reader (Chinese & English)", layout="centered")
+st.set_page_config(page_title="PDF OCR Reader (Chinese)", layout="centered")
 
-st.title("📄 Scanned PDF OCR App")
-st.write("Upload any scanned PDF with mixed Chinese and English, and the app will automatically extract all the text.")
+st.title("📄 Scanned PDF OCR App (Chinese / English)")
+st.write("Upload a scanned PDF document and select your Chinese script type in the sidebar.")
 
-# Load EasyOCR model for Chinese and English simultaneously (cached so it loads once)
+# Sidebar option to choose script
+script_choice = st.sidebar.selectbox(
+    "Select Chinese Script Type",
+    ["Simplified Chinese (简体中文)", "Traditional Chinese (繁體中文)"]
+)
+
+# Map choice to EasyOCR language code
+if "Simplified" in script_choice:
+    lang_code = 'ch_sim'
+else:
+    lang_code = 'ch_tra'
+
+# Load EasyOCR model dynamically based on selection (cached for performance)
 @st.cache_resource
-def load_ocr_reader():
-    return easyocr.Reader(['ch_sim', 'en'])
+def load_ocr_reader(lang):
+    return easyocr.Reader([lang, 'en'])
 
-with st.spinner("Loading OCR engine... (Takes about a minute on the first launch to fetch models)"):
-    reader = load_ocr_reader()
+with st.spinner(f"Loading OCR engine for {script_choice}... (This takes a moment on the first run)"):
+    reader = load_ocr_reader(lang_code)
 
 # File uploader widget
 uploaded_file = st.file_uploader("Upload your PDF file", type=["pdf"])
@@ -40,14 +52,14 @@ if uploaded_file is not None:
         for page_num in range(total_pages):
             page = pdf_document[page_num]
             
-            # Convert PDF page to high-resolution image (dpi=300 for clean character precision)
+            # Convert PDF page to a high-resolution image (dpi=300 for sharp character strokes)
             pix = page.get_pixmap(dpi=300)
             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
             
             # Convert image to numpy array for EasyOCR
             img_np = np.array(img)
             
-            # Run OCR on the page image (automatically reads both Chinese and English characters)
+            # Run OCR on the page image
             results = reader.readtext(img_np, detail=0)
             page_text = "\n".join(results)
             
