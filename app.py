@@ -7,15 +7,15 @@ import numpy as np
 # Page configuration
 st.set_page_config(page_title="PDF OCR Reader (Chinese & English)", layout="centered")
 
-st.title("📄 Scanned PDF OCR App (Chinese / English)")
-st.write("Upload a scanned PDF document containing Chinese or English, and this app will automatically extract the text.")
+st.title("📄 Scanned PDF OCR App")
+st.write("Upload any scanned PDF with mixed Chinese and English, and the app will automatically extract all the text.")
 
-# Load EasyOCR model with Simplified Chinese, Traditional Chinese, and English support
+# Load EasyOCR model for Chinese and English simultaneously (cached so it loads once)
 @st.cache_resource
 def load_ocr_reader():
-    return easyocr.Reader(['ch_sim', 'ch_tra', 'en'])
+    return easyocr.Reader(['ch_sim', 'en'])
 
-with st.spinner("Loading OCR engine... (This takes a minute on the first run as it downloads language weights)"):
+with st.spinner("Loading OCR engine... (Takes about a minute on the first launch to fetch models)"):
     reader = load_ocr_reader()
 
 # File uploader widget
@@ -40,14 +40,14 @@ if uploaded_file is not None:
         for page_num in range(total_pages):
             page = pdf_document[page_num]
             
-            # Convert PDF page to a high-resolution image (dpi=300 for sharp Chinese character strokes)
+            # Convert PDF page to high-resolution image (dpi=300 for clean character precision)
             pix = page.get_pixmap(dpi=300)
             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
             
             # Convert image to numpy array for EasyOCR
             img_np = np.array(img)
             
-            # Run OCR on the page image
+            # Run OCR on the page image (automatically reads both Chinese and English characters)
             results = reader.readtext(img_np, detail=0)
             page_text = "\n".join(results)
             
