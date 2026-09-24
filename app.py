@@ -5,21 +5,21 @@ from PIL import Image
 import numpy as np
 
 # Page configuration
-st.set_page_config(page_title="PDF OCR Reader (Simplified Chinese)", layout="centered")
+st.set_page_config(page_title="PDF OCR Reader", layout="centered")
 
-st.title("📄 Scanned PDF OCR App (Simplified Chinese)")
-st.write("Upload a scanned PDF document, and this app will automatically extract the text.")
+st.title("📄 Scanned PDF OCR App")
+st.write("Upload a scanned PDF document, and this app will automatically extract the text using OCR.")
 
-# Load EasyOCR model (Simplified Chinese + English)
+# Load EasyOCR model (cached so it only loads once)
 @st.cache_resource
 def load_ocr_reader():
-    return easyocr.Reader(['ch_sim', 'en'])
+    return easyocr.Reader(['en']) # Loads the English OCR engine
 
-with st.spinner("Loading OCR engine... (This takes a minute on the first run)"):
+with st.spinner("Loading OCR engine... Please wait a moment."):
     reader = load_ocr_reader()
 
 # File uploader widget
-uploaded_file = st.file_uploader("Upload your PDF file", type=["pdf"])
+uploaded_file = st.file_uploader("Upload your PDF file here", type=["pdf"])
 
 if uploaded_file is not None:
     st.success("PDF uploaded successfully!")
@@ -40,8 +40,8 @@ if uploaded_file is not None:
         for page_num in range(total_pages):
             page = pdf_document[page_num]
             
-            # Convert PDF page to a high-resolution image (dpi=300 for sharp character clarity)
-            pix = page.get_pixmap(dpi=300)
+            # Convert PDF page to an image
+            pix = page.get_pixmap(dpi=150)
             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
             
             # Convert image to numpy array for EasyOCR
