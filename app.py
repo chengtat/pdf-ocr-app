@@ -12,6 +12,16 @@ st.set_page_config(page_title="Multilingual PDF OCR Studio", layout="wide")
 st.title("📄 Multilingual PDF OCR Studio (EN / Chinese)")
 st.write("Upload a PDF document to extract text using lightweight, high-performance RapidOCR with advanced analytics and visual bounding boxes.")
 
+# Initialize Session State variables to persist results across reruns
+if "extracted_full_text" not in st.session_state:
+    st.session_state.extracted_full_text = ""
+if "structured_data" not in st.session_state:
+    st.session_state.structured_data = []
+if "total_chinese_chars" not in st.session_state:
+    st.session_state.total_chinese_chars = 0
+if "total_english_words" not in st.session_state:
+    st.session_state.total_english_words = 0
+
 # Sidebar Controls for Advanced Features
 st.sidebar.header("⚙️ Processing Settings")
 mode = st.sidebar.radio("Extraction Mode", ["Full Document", "Single Page Preview"])
@@ -60,7 +70,6 @@ if uploaded_file is not None:
                 with st.spinner("Running OCR..."):
                     result, _ = ocr_engine(img_np)
                     if result and show_bounding_boxes:
-                        # Draw bounding boxes using OpenCV
                         annotated_img = img_np.copy()
                         for line in result:
                             box = np.array(line[0], dtype=np.int32)
@@ -99,10 +108,10 @@ if uploaded_file is not None:
             progress_bar = st.progress(0)
             status_text = st.empty()
             
-            extracted_full_text = ""
-            structured_data = []
-            total_chinese_chars = 0
-            total_english_words = 0
+            temp_full_text = ""
+            temp_structured_data = []
+            temp_chinese_chars = 0
+            temp_english_words = 0
             
             for page_num in range(total_pages):
                 status_text.text(f"Processing page {page_num + 1} of {total_pages}...")
@@ -118,31 +127,37 @@ if uploaded_file is not None:
                 page_text = ""
                 if result:
                     page_text = "\n".join([line[1] for line in result])
-                    # Calculate simple analytics
                     for line in result:
                         text_val = line[1]
-                        # Count Chinese characters (Unicode range)
-                        total_chinese_chars += sum(1 for c in text_val if '\u4e00' <= c <= '\u9fff')
-                        # Count English words approx
-                        total_english_words += len([w for w in text_val.split() if w.isascii()])
+                        temp_chinese_chars += sum(1 for c in text_val if '\u4e00' <= c <= '\u9fff')
+                        temp_english_words += len([w for w in text_val.split() if w.isascii()])
                         
                         if show_confidence:
                             page_lines.append({"text": text_val, "confidence": float(line[2])})
                 
-                extracted_full_text += f"\n\n--- Page {page_num + 1} ---\n\n" + page_text
-                structured_data.append({"page": page_num + 1, "content": page_text, "lines": page_lines})
+                temp_full_text += f"\n\n--- Page {page_num + 1} ---\n\n" + page_text
+                temp_structured_data.append({"page": page_num + 1, "content": page_text, "lines": page_lines})
                 
                 progress_bar.progress((page_num + 1) / total_pages)
                 
+            # Save results into session state so they persist
+            st.session_state.extracted_full_text = temp_full_text
+            st.session_state.structured_data = temp_structured_data
+            st.session_state.total_chinese_chars = temp_chinese_chars
+            st.session_state.total_english_words = temp_english_words
+            
             status_text.text("OCR Processing Complete!")
             st.success("All pages successfully processed!")
+
+        # Display results and controls if extraction data exists in session state
+        if st.session_state.extracted_full_text:
             
             # --- ADVANCED ANALYTICS EXPANDER ---
             with st.expander("📊 Document Text Analytics", expanded=True):
                 stat_col1, stat_col2, stat_col3 = st.columns(3)
-                stat_col1.metric("Total Characters", len(extracted_full_text))
-                stat_col2.metric("Estimated Chinese Characters", total_chinese_chars)
-                stat_col3.metric("Estimated English Words", total_english_words)
+                stat_col1.metric("Total Characters", len(st.session_state.extracted_full_text))
+                stat_col2.metric("Estimated Chinese Characters", st.session_state.total_chinese_chars)
+                stat_col3.metric("Estimated English Words", st.session_state.total_english_words)
 
             # --- PROMINENT EXPORT SECTION ---
             st.markdown("### 📥 Export Options")
@@ -151,13 +166,13 @@ if uploaded_file is not None:
             with export_col1:
                 st.download_button(
                     label="📄 Download Full Text (.txt)",
-                    data=extracted_full_text,
+                    data=st.session_state.extracted_full_text,
                     file_name="extracted_ocr_text.txt",
                     mime="text/plain",
                     type="primary"
                 )
             with export_col2:
-                json_string = json.dumps(structured_data, ensure_ascii=False, indent=4)
+                json_string = json.dumps(st.session_state.structured_data, ensure_ascii=False, indent=4)
                 st.download_button(
                     label="📊 Download Structured Data (.json)",
                     data=json_string,
@@ -171,16 +186,16 @@ if uploaded_file is not None:
             st.markdown("### 🔍 Search Extracted Text")
             search_query = st.text_input("Type a keyword or phrase to look for inside the text:")
             if search_query:
-                matching_lines = [line for line in extracted_full_text.split("\n") if search_query.lower() in line.lower()]
+                matching_lines = [line for line in st.session_state.extracted_full_text.split("\n") if search_query.lower() in line.lower()]
                 st.info(f"Found {len(matching_lines)} matching lines for '{search_query}':")
-                for match in matching_lines[:10]: # show top 10 matches
+                for match in matching_lines[:10]: 
                     st.code(match)
 
             # Display results in tabs for viewing
             tab1, tab2 = st.tabs(["📝 Plain Text View", "📊 JSON Structure Preview"])
             
             with tab1:
-                st.text_area("Full Document Result", value=extracted_full_text, height=350)
+                st.text_area("Full Document Result", value=st.session_state.extracted_full_text, height=350, key="full_text_area")
                 
             with tab2:
                 st.code(json_string, language="json")
