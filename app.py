@@ -4,16 +4,18 @@ from rapidocr_onnxruntime import RapidOCR
 from PIL import Image
 import numpy as np
 import json
+import cv2
 
 # Page configuration
 st.set_page_config(page_title="Multilingual PDF OCR Studio", layout="wide")
 
 st.title("📄 Multilingual PDF OCR Studio (EN / Chinese)")
-st.write("Upload a PDF document to extract text using lightweight, high-performance RapidOCR.")
+st.write("Upload a PDF document to extract text using lightweight, high-performance RapidOCR with advanced analytics and visual bounding boxes.")
 
 # Sidebar Controls for Advanced Features
 st.sidebar.header("⚙️ Processing Settings")
 mode = st.sidebar.radio("Extraction Mode", ["Full Document", "Single Page Preview"])
+show_bounding_boxes = st.sidebar.checkbox("Draw Bounding Boxes on Image", value=True)
 show_confidence = st.sidebar.checkbox("Show Text Confidence Scores", value=False)
 
 # Initialize lightweight RapidOCR engine (cached)
@@ -48,23 +50,36 @@ if uploaded_file is not None:
         # Render page preview
         pix = page.get_pixmap(dpi=150)
         img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        img_np = np.array(img)
         
         col_img, col_txt = st.columns(2)
         with col_img:
             st.subheader(f"Page {page_num + 1} Preview")
-            st.image(img, use_container_width=True)
+            
+            if st.button("Run OCR & Draw Boxes"):
+                with st.spinner("Running OCR..."):
+                    result, _ = ocr_engine(img_np)
+                    if result and show_bounding_boxes:
+                        # Draw bounding boxes using OpenCV
+                        annotated_img = img_np.copy()
+                        for line in result:
+                            box = np.array(line[0], dtype=np.int32)
+                            cv2.polylines(annotated_img, [box], isClosed=True, color=(0, 255, 0), thickness=2)
+                        st.image(annotated_img, use_container_width=True)
+                    else:
+                        st.image(img, use_container_width=True)
+            else:
+                st.image(img, use_container_width=True)
             
         with col_txt:
             st.subheader("Extracted Text")
-            if st.button("Extract This Page Now"):
+            if st.button("Extract Text Only"):
                 with st.spinner("Running OCR..."):
-                    img_np = np.array(img)
                     result, _ = ocr_engine(img_np)
                     if result:
                         page_text = "\n".join([line[1] for line in result])
                         st.text_area("Result", value=page_text, height=300)
                         
-                        # Direct text download for single page
                         st.download_button(
                             label="📥 Download Page Text as .txt",
                             data=page_text,
@@ -86,35 +101,49 @@ if uploaded_file is not None:
             
             extracted_full_text = ""
             structured_data = []
+            total_chinese_chars = 0
+            total_english_words = 0
             
             for page_num in range(total_pages):
                 status_text.text(f"Processing page {page_num + 1} of {total_pages}...")
                 page = pdf_document[page_num]
                 
-                # Convert PDF page to an image
                 pix = page.get_pixmap(dpi=200)
                 img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
                 img_np = np.array(img)
                 
-                # Run OCR on the page image
                 result, _ = ocr_engine(img_np)
                 
                 page_lines = []
                 page_text = ""
                 if result:
                     page_text = "\n".join([line[1] for line in result])
-                    if show_confidence:
-                        page_lines = [{"text": line[1], "confidence": float(line[2])} for line in result]
+                    # Calculate simple analytics
+                    for line in result:
+                        text_val = line[1]
+                        # Count Chinese characters (Unicode range)
+                        total_chinese_chars += sum(1 for c in text_val if '\u4e00' <= c <= '\u9fff')
+                        # Count English words approx
+                        total_english_words += len([w for w in text_val.split() if w.isascii()])
+                        
+                        if show_confidence:
+                            page_lines.append({"text": text_val, "confidence": float(line[2])})
                 
                 extracted_full_text += f"\n\n--- Page {page_num + 1} ---\n\n" + page_text
                 structured_data.append({"page": page_num + 1, "content": page_text, "lines": page_lines})
                 
-                # Update progress bar
                 progress_bar.progress((page_num + 1) / total_pages)
                 
             status_text.text("OCR Processing Complete!")
             st.success("All pages successfully processed!")
             
+            # --- ADVANCED ANALYTICS EXPANDER ---
+            with st.expander("📊 Document Text Analytics", expanded=True):
+                stat_col1, stat_col2, stat_col3 = st.columns(3)
+                stat_col1.metric("Total Characters", len(extracted_full_text))
+                stat_col2.metric("Estimated Chinese Characters", total_chinese_chars)
+                stat_col3.metric("Estimated English Words", total_english_words)
+
             # --- PROMINENT EXPORT SECTION ---
             st.markdown("### 📥 Export Options")
             export_col1, export_col2 = st.columns(2)
@@ -137,6 +166,15 @@ if uploaded_file is not None:
                 )
             
             st.divider()
+
+            # --- IN-APP KEYWORD SEARCH ---
+            st.markdown("### 🔍 Search Extracted Text")
+            search_query = st.text_input("Type a keyword or phrase to look for inside the text:")
+            if search_query:
+                matching_lines = [line for line in extracted_full_text.split("\n") if search_query.lower() in line.lower()]
+                st.info(f"Found {len(matching_lines)} matching lines for '{search_query}':")
+                for match in matching_lines[:10]: # show top 10 matches
+                    st.code(match)
 
             # Display results in tabs for viewing
             tab1, tab2 = st.tabs(["📝 Plain Text View", "📊 JSON Structure Preview"])
