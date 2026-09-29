@@ -34,7 +34,7 @@ with st.spinner("Loading OCR engine... This may take a moment on the first run."
     reader = load_ocr_reader(selected_langs)
 
 if reader is None:
-    st.error("Failed to initialize the OCR engine. Please check your deployment logs.")
+    st.error("Failed to initialize the OCR engine. Please check your deployment logs for missing packages.")
 else:
     # File uploader widget
     uploaded_file = st.file_uploader("Upload your PDF file here", type=["pdf"])
