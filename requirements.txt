@@ -3,3 +3,6 @@ pymupdf
 easyocr
 pillow
 numpy
+torch
+torchvision
+opencv-python-headless
