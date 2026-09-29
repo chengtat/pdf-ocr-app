@@ -3,14 +3,20 @@ import fitz   # PyMuPDF to read PDFs
 from rapidocr_onnxruntime import RapidOCR
 from PIL import Image
 import numpy as np
+import json
 
 # Page configuration
-st.set_page_config(page_title="Multilingual PDF OCR Reader", layout="centered")
+st.set_page_config(page_title="Multilingual PDF OCR Studio", layout="wide")
 
-st.title("📄 Multilingual Scanned PDF OCR App")
-st.write("Upload a scanned PDF document and extract text using lightweight OCR supporting English and Chinese.")
+st.title("📄 Multilingual PDF OCR Studio (EN / Chinese)")
+st.write("Upload a PDF document to extract text using lightweight, high-performance RapidOCR.")
 
-# Initialize lightweight RapidOCR (cached so it loads only once)
+# Sidebar Controls for Advanced Features
+st.sidebar.header("⚙️ Processing Settings")
+mode = st.sidebar.radio("Extraction Mode", ["Full Document", "Single Page Preview"])
+show_confidence = st.sidebar.checkbox("Show Text Confidence Scores", value=False)
+
+# Initialize lightweight RapidOCR engine (cached)
 @st.cache_resource
 def load_ocr_engine():
     return RapidOCR()
@@ -22,54 +28,103 @@ with st.spinner("Loading OCR engine..."):
 uploaded_file = st.file_uploader("Upload your PDF file here", type=["pdf"])
 
 if uploaded_file is not None:
-    st.success("PDF uploaded successfully!")
-    
     # Read the PDF using PyMuPDF
     pdf_bytes = uploaded_file.read()
     pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
-    
     total_pages = len(pdf_document)
-    st.info(f"Total pages found in PDF: {total_pages}")
-    
-    extracted_full_text = ""
-    
-    # Process button
-    if st.button("Start OCR Extraction"):
-        progress_bar = st.progress(0)
+
+    # Dashboard Metrics
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total Pages", total_pages)
+    col2.metric("File Name", uploaded_file.name)
+    col3.metric("Engine", "RapidOCR (ONNX)")
+
+    st.divider()
+
+    if mode == "Single Page Preview":
+        page_num = st.sidebar.slider("Select Page to Preview", 1, total_pages, 1) - 1
+        page = pdf_document[page_num]
         
-        for page_num in range(total_pages):
-            page = pdf_document[page_num]
-            
-            # Convert PDF page to an image
-            pix = page.get_pixmap(dpi=200)
-            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            
-            # Convert image to numpy array for RapidOCR
-            img_np = np.array(img)
-            
-            # Run OCR on the page image
-            result, _ = ocr_engine(img_np)
-            
-            page_text = ""
-            if result:
-                # result returns a list of [box, text, confidence]
-                page_text = "\n".join([line[1] for line in result])
-            
-            extracted_full_text += f"\n\n--- Page {page_num + 1} ---\n\n" + page_text
-            
-            # Update progress bar
-            progress_bar.progress((page_num + 1) / total_pages)
-            
-        st.success("OCR Processing Complete!")
+        # Render page preview
+        pix = page.get_pixmap(dpi=150)
+        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
         
-        # Display the result in a text area box
-        st.subheader("Extracted Text Output:")
-        st.text_area("Result", value=extracted_full_text, height=300)
-        
-        # Download button for the text file
-        st.download_button(
-            label="Download Extracted Text as .txt",
-            data=extracted_full_text,
-            file_name="extracted_ocr_text.txt",
-            mime="text/plain"
-        )
+        col_img, col_txt = st.columns(2)
+        with col_img:
+            st.subheader(f"Page {page_num + 1} Preview")
+            st.image(img, use_container_width=True)
+            
+        with col_txt:
+            st.subheader("Extracted Text")
+            if st.button("Extract This Page Now"):
+                with st.spinner("Running OCR..."):
+                    img_np = np.array(img)
+                    result, _ = ocr_engine(img_np)
+                    if result:
+                        page_text = "\n".join([line[1] for line in result])
+                        st.text_area("Result", value=page_text, height=300)
+                        
+                        if show_confidence:
+                            st.write("**Confidence Scores:**")
+                            for line in result:
+                                st.caption(f"- `{line[1]}` (Confidence: {line[2]:.2f})")
+                    else:
+                        st.info("No text detected on this page.")
+
+    else: # Full Document Mode
+        if st.button("🚀 Start Full Document OCR Extraction", type="primary"):
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            extracted_full_text = ""
+            structured_data = []
+            
+            for page_num in range(total_pages):
+                status_text.text(f"Processing page {page_num + 1} of {total_pages}...")
+                page = pdf_document[page_num]
+                
+                # Convert PDF page to an image
+                pix = page.get_pixmap(dpi=200)
+                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                img_np = np.array(img)
+                
+                # Run OCR on the page image
+                result, _ = ocr_engine(img_np)
+                
+                page_lines = []
+                page_text = ""
+                if result:
+                    page_text = "\n".join([line[1] for line in result])
+                    if show_confidence:
+                        page_lines = [{"text": line[1], "confidence": float(line[2])} for line in result]
+                
+                extracted_full_text += f"\n\n--- Page {page_num + 1} ---\n\n" + page_text
+                structured_data.append({"page": page_num + 1, "content": page_text, "lines": page_lines})
+                
+                # Update progress bar
+                progress_bar.progress((page_num + 1) / total_pages)
+                
+            status_text.text("OCR Processing Complete!")
+            st.success("All pages successfully processed!")
+            
+            # Display results in tabs
+            tab1, tab2 = st.tabs(["📝 Plain Text View", "📊 JSON Export Preview"])
+            
+            with tab1:
+                st.text_area("Full Document Result", value=extracted_full_text, height=350)
+                st.download_button(
+                    label="📥 Download as .txt",
+                    data=extracted_full_text,
+                    file_name="extracted_ocr_text.txt",
+                    mime="text/plain"
+                )
+                
+            with tab2:
+                json_string = json.dumps(structured_data, ensure_ascii=False, indent=4)
+                st.code(json_string, language="json")
+                st.download_button(
+                    label="📥 Download as Structured JSON",
+                    data=json_string,
+                    file_name="extracted_ocr_data.json",
+                    mime="application/json"
+                )
