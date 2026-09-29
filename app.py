@@ -64,6 +64,14 @@ if uploaded_file is not None:
                         page_text = "\n".join([line[1] for line in result])
                         st.text_area("Result", value=page_text, height=300)
                         
+                        # Direct text download for single page
+                        st.download_button(
+                            label="📥 Download Page Text as .txt",
+                            data=page_text,
+                            file_name=f"page_{page_num + 1}_text.txt",
+                            mime="text/plain"
+                        )
+                        
                         if show_confidence:
                             st.write("**Confidence Scores:**")
                             for line in result:
@@ -107,24 +115,34 @@ if uploaded_file is not None:
             status_text.text("OCR Processing Complete!")
             st.success("All pages successfully processed!")
             
-            # Display results in tabs
-            tab1, tab2 = st.tabs(["📝 Plain Text View", "📊 JSON Export Preview"])
+            # --- PROMINENT EXPORT SECTION ---
+            st.markdown("### 📥 Export Options")
+            export_col1, export_col2 = st.columns(2)
             
-            with tab1:
-                st.text_area("Full Document Result", value=extracted_full_text, height=350)
+            with export_col1:
                 st.download_button(
-                    label="📥 Download as .txt",
+                    label="📄 Download Full Text (.txt)",
                     data=extracted_full_text,
                     file_name="extracted_ocr_text.txt",
-                    mime="text/plain"
+                    mime="text/plain",
+                    type="primary"
                 )
-                
-            with tab2:
+            with export_col2:
                 json_string = json.dumps(structured_data, ensure_ascii=False, indent=4)
-                st.code(json_string, language="json")
                 st.download_button(
-                    label="📥 Download as Structured JSON",
+                    label="📊 Download Structured Data (.json)",
                     data=json_string,
                     file_name="extracted_ocr_data.json",
                     mime="application/json"
                 )
+            
+            st.divider()
+
+            # Display results in tabs for viewing
+            tab1, tab2 = st.tabs(["📝 Plain Text View", "📊 JSON Structure Preview"])
+            
+            with tab1:
+                st.text_area("Full Document Result", value=extracted_full_text, height=350)
+                
+            with tab2:
+                st.code(json_string, language="json")
