@@ -1,8 +1,6 @@
 streamlit
 pymupdf
-easyocr
+rapidocr-onnxruntime
 pillow
 numpy
-torch
-torchvision
-opencv-python-headless
+onnxruntime
