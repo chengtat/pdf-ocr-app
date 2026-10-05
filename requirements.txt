@@ -1,6 +1,7 @@
 streamlit
-pymupdf
+PyMuPDF
 rapidocr-onnxruntime
+opencv-python-headless
 pillow
 numpy
-onnxruntime
+gtts
