@@ -1,5 +1,5 @@
 import streamlit as st
-import fitz   # PyMuPDF to read PDFs
+import fitz  # PyMuPDF to read PDFs
 from rapidocr_onnxruntime import RapidOCR
 from PIL import Image
 import numpy as np
@@ -28,7 +28,7 @@ if "total_english_words" not in st.session_state:
 st.sidebar.header("⚙️ Processing Settings")
 mode = st.sidebar.radio("Extraction Mode", ["Full Document", "Single Page Preview"])
 show_bounding_boxes = st.sidebar.checkbox("Draw Bounding Boxes on Image", value=True)
-show_confidence = st.sidebar.checkbox("Show Text Confidence Scores", value=False)
+show_confidence = st.sidebar.checkbox("Show Text Confidence Scores", value=True)
 
 # Initialize RapidOCR engine (cached)
 @st.cache_resource
@@ -84,14 +84,21 @@ if uploaded_file is not None:
                     result, _ = ocr_engine(img_np)
                     if result:
                         page_text = "\n".join([line[1] for line in result])
-                        st.text_area("Result", value=page_text, height=250)
+                        st.text_area("Result", value=page_text, height=200)
+                        
+                        # --- 💡 新增：顯示信心分數 (Confidence Scores) ---
+                        if show_confidence:
+                            with st.expander("🔍 Text Line Confidence Scores", expanded=False):
+                                for line in result:
+                                    text_val = line[1]
+                                    conf_val = float(line[2])
+                                    st.write(f"- `{text_val}` (Confidence: **{conf_val:.4f}**)")
                         
                         # --- 🔊 Text-to-Speech (gTTS) 整合 ---
                         st.markdown("### 🔊 Audio Playback")
                         tts_lang = st.selectbox("Select TTS Language", ["zh-CN", "en"], index=0, key=f"tts_lang_{page_num}")
                         
                         try:
-                            # 記憶體中生成語音檔，不佔用硬碟空間
                             tts = gTTS(text=page_text, lang=tts_lang)
                             audio_fp = io.BytesIO()
                             tts.write_to_fp(audio_fp)
