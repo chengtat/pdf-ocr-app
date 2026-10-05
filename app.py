@@ -7,7 +7,8 @@ import json
 import cv2
 import asyncio
 import edge_tts
-import io
+import tempfile
+import os
 
 # Page configuration
 st.set_page_config(page_title="Multilingual PDF OCR Studio + Edge-TTS", layout="wide")
@@ -47,14 +48,16 @@ def load_ocr_engine():
 with st.spinner("Loading OCR engine..."):
     ocr_engine = load_ocr_engine()
 
-# Async helper function for Edge-TTS streaming
-async def generate_edge_audio(text, voice_name):
-    communicate = edge_tts.Communicate(text, voice_name)
-    audio_bytes = b""
-    async for chunk in communicate.stream():
-        if chunk["type"] == "audio":
-            audio_bytes += chunk["data"]
-    return audio_bytes
+# Edge-TTS File Saving Helper (Fixes Streamlit event loop deadlock)
+def generate_and_save_audio(text, voice_name):
+    async def _save():
+        communicate = edge_tts.Communicate(text, voice_name)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_file:
+            tmp_path = tmp_file.name
+        await communicate.save(tmp_path)
+        return tmp_path
+
+    return asyncio.run(_save())
 
 # File uploader widget
 uploaded_file = st.file_uploader("Upload your PDF file here", type=["pdf"])
@@ -120,13 +123,18 @@ if uploaded_file is not None:
                         if st.button("Generate Speech", key=f"gen_audio_{page_num}"):
                             with st.spinner("Synthesizing audio..."):
                                 try:
-                                    audio_data = asyncio.run(generate_edge_audio(page_text, voice_id))
-                                    audio_fp = io.BytesIO(audio_data)
+                                    audio_path = generate_and_save_audio(page_text, voice_id)
                                     
-                                    st.audio(audio_fp, format="audio/mp3")
+                                    with open(audio_path, "rb") as f:
+                                        audio_bytes = f.read()
+                                    
+                                    # 清理暫存檔
+                                    os.unlink(audio_path)
+                                    
+                                    st.audio(audio_bytes, format="audio/mp3")
                                     st.download_button(
                                         label="📥 Download Audio (.mp3)",
-                                        data=audio_fp,
+                                        data=audio_bytes,
                                         file_name=f"page_{page_num + 1}_audio.mp3",
                                         mime="audio/mp3",
                                         key=f"download_audio_{page_num}"
@@ -233,13 +241,17 @@ if uploaded_file is not None:
             if st.button("Generate Audio for Full Document"):
                 with st.spinner("Synthesizing full document audio..."):
                     try:
-                        audio_data = asyncio.run(generate_edge_audio(st.session_state.extracted_full_text, voice_full_id))
-                        full_audio_fp = io.BytesIO(audio_data)
+                        audio_path = generate_and_save_audio(st.session_state.extracted_full_text, voice_full_id)
                         
-                        st.audio(full_audio_fp, format="audio/mp3")
+                        with open(audio_path, "rb") as f:
+                            full_audio_bytes = f.read()
+                            
+                        os.unlink(audio_path)
+                        
+                        st.audio(full_audio_bytes, format="audio/mp3")
                         st.download_button(
                             label="📥 Download Full Document Audio (.mp3)",
-                            data=full_audio_fp,
+                            data=full_audio_bytes,
                             file_name="full_document_audio.mp3",
                             mime="audio/mp3"
                         )
