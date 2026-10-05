@@ -48,8 +48,11 @@ def load_ocr_engine():
 with st.spinner("Loading OCR engine..."):
     ocr_engine = load_ocr_engine()
 
-# Edge-TTS File Saving Helper (Fixes Streamlit event loop deadlock)
+# 🛠️ 修復版 Edge-TTS 函數：建立獨立 Event Loop 避開 Streamlit 執行緒死結
 def generate_and_save_audio(text, voice_name):
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
     async def _save():
         communicate = edge_tts.Communicate(text, voice_name)
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_file:
@@ -57,7 +60,10 @@ def generate_and_save_audio(text, voice_name):
         await communicate.save(tmp_path)
         return tmp_path
 
-    return asyncio.run(_save())
+    try:
+        return loop.run_until_complete(_save())
+    finally:
+        loop.close()
 
 # File uploader widget
 uploaded_file = st.file_uploader("Upload your PDF file here", type=["pdf"])
@@ -253,7 +259,7 @@ if uploaded_file is not None:
                             label="📥 Download Full Document Audio (.mp3)",
                             data=full_audio_bytes,
                             file_name="full_document_audio.mp3",
-                            mime="audio/mp3"
+                            mime="application/mp3"
                         )
                     except Exception as e:
                         st.error(f"Full TTS Error: {e}")
