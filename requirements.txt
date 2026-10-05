@@ -4,4 +4,6 @@ rapidocr-onnxruntime
 opencv-python-headless
 pillow
 numpy
-gtts
+edge-tts
+
+
