@@ -5,14 +5,15 @@ from PIL import Image
 import numpy as np
 import json
 import cv2
-from gtts import gTTS
+import asyncio
+import edge_tts
 import io
 
 # Page configuration
-st.set_page_config(page_title="Multilingual PDF OCR Studio + TTS", layout="wide")
+st.set_page_config(page_title="Multilingual PDF OCR Studio + Edge-TTS", layout="wide")
 
-st.title("📄 Multilingual PDF OCR Studio (EN / Chinese) + TTS")
-st.write("Upload a PDF document to extract text using RapidOCR and convert it to speech (Supports Mandarin, English, and Cantonese).")
+st.title("📄 Multilingual PDF OCR Studio + Edge-TTS")
+st.write("Upload a PDF document to extract text using RapidOCR and convert to high-quality speech (Supports Cantonese, Mandarin, and English).")
 
 # Initialize Session State variables to persist results across reruns
 if "extracted_full_text" not in st.session_state:
@@ -30,11 +31,12 @@ mode = st.sidebar.radio("Extraction Mode", ["Full Document", "Single Page Previe
 show_bounding_boxes = st.sidebar.checkbox("Draw Bounding Boxes on Image", value=True)
 show_confidence = st.sidebar.checkbox("Show Text Confidence Scores", value=False)
 
-# TTS Language Options Dictionary
-language_options = {
-    "廣東話 / 粵語 (zh-yue)": "zh-yue",
-    "普通話 / 簡體 (zh-CN)": "zh-CN",
-    "English (en)": "en",
+# Edge-TTS Voice Mapping Dictionary
+voice_options = {
+    "🇭🇰 廣東話 (女聲 - HiuMaan)": "zh-HK-HiuMaanNeural",
+    "🇭🇰 廣東話 (男聲 - WanLung)": "zh-HK-WanLungNeural",
+    "🇨🇳 普通話 (女聲 - Xiaoxiao)": "zh-CN-XiaoxiaoNeural",
+    "🇺🇸 English (Aria)": "en-US-AriaNeural",
 }
 
 # Initialize lightweight RapidOCR engine (cached)
@@ -44,6 +46,15 @@ def load_ocr_engine():
 
 with st.spinner("Loading OCR engine..."):
     ocr_engine = load_ocr_engine()
+
+# Async helper function for Edge-TTS streaming
+async def generate_edge_audio(text, voice_name):
+    communicate = edge_tts.Communicate(text, voice_name)
+    audio_bytes = b""
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            audio_bytes += chunk["data"]
+    return audio_bytes
 
 # File uploader widget
 uploaded_file = st.file_uploader("Upload your PDF file here", type=["pdf"])
@@ -57,7 +68,7 @@ if uploaded_file is not None:
     col1, col2, col3 = st.columns(3)
     col1.metric("Total Pages", total_pages)
     col2.metric("File Name", uploaded_file.name)
-    col3.metric("Engine", "RapidOCR (ONNX)")
+    col3.metric("Engine", "RapidOCR + Edge-TTS")
 
     st.divider()
 
@@ -96,32 +107,32 @@ if uploaded_file is not None:
                         page_text = "\n".join([line[1] for line in result])
                         st.text_area("Result", value=page_text, height=250)
                         
-                        # --- 🔊 Text-to-Speech (gTTS) 整合 ---
-                        st.markdown("### 🔊 Audio Playback")
+                        # --- 🔊 Edge-TTS 語音整合 ---
+                        st.markdown("### 🔊 Edge-TTS Audio Playback")
                         selected_label = st.selectbox(
-                            "Select TTS Language", 
-                            options=list(language_options.keys()), 
+                            "Select Voice", 
+                            options=list(voice_options.keys()), 
                             index=0, 
-                            key=f"tts_lang_{page_num}"
+                            key=f"voice_{page_num}"
                         )
-                        tts_lang = language_options[selected_label]
+                        voice_id = voice_options[selected_label]
                         
-                        try:
-                            tts = gTTS(text=page_text, lang=tts_lang)
-                            audio_fp = io.BytesIO()
-                            tts.write_to_fp(audio_fp)
-                            audio_fp.seek(0)
-                            
-                            st.audio(audio_fp, format="audio/mp3")
-                            st.download_button(
-                                label="📥 Download Audio (.mp3)",
-                                data=audio_fp,
-                                file_name=f"page_{page_num + 1}_audio.mp3",
-                                mime="audio/mp3",
-                                key=f"download_audio_{page_num}"
-                            )
-                        except Exception as e:
-                            st.error(f"TTS Error: {e}")
+                        if st.button("Generate Speech", key=f"gen_audio_{page_num}"):
+                            with st.spinner("Synthesizing audio..."):
+                                try:
+                                    audio_data = asyncio.run(generate_edge_audio(page_text, voice_id))
+                                    audio_fp = io.BytesIO(audio_data)
+                                    
+                                    st.audio(audio_fp, format="audio/mp3")
+                                    st.download_button(
+                                        label="📥 Download Audio (.mp3)",
+                                        data=audio_fp,
+                                        file_name=f"page_{page_num + 1}_audio.mp3",
+                                        mime="audio/mp3",
+                                        key=f"download_audio_{page_num}"
+                                    )
+                                except Exception as e:
+                                    st.error(f"TTS Error: {e}")
                             
                         st.download_button(
                             label="📥 Download Page Text as .txt",
@@ -190,7 +201,7 @@ if uploaded_file is not None:
                 stat_col2.metric("Estimated Chinese Characters", st.session_state.total_chinese_chars)
                 stat_col3.metric("Estimated English Words", st.session_state.total_english_words)
 
-            st.markdown("### 📥 Export Options & Text-to-Speech")
+            st.markdown("### 📥 Export Options & Edge-TTS")
             export_col1, export_col2 = st.columns(2)
             
             with export_col1:
@@ -210,22 +221,20 @@ if uploaded_file is not None:
                     mime="application/json"
                 )
             
-            # --- 全文語音轉檔 (TTS) ---
-            st.markdown("### 🔊 Listen to Extracted Text (TTS)")
+            # --- 全文 Edge-TTS 語音轉檔 ---
+            st.markdown("### 🔊 Listen to Full Document (Edge-TTS)")
             selected_full_label = st.selectbox(
-                "Select TTS Language for Full Doc",
-                options=list(language_options.keys()),
+                "Select Voice for Full Doc",
+                options=list(voice_options.keys()),
                 index=0
             )
-            tts_full_lang = language_options[selected_full_label]
+            voice_full_id = voice_options[selected_full_label]
             
             if st.button("Generate Audio for Full Document"):
-                with st.spinner("Generating MP3 audio..."):
+                with st.spinner("Synthesizing full document audio..."):
                     try:
-                        tts = gTTS(text=st.session_state.extracted_full_text, lang=tts_full_lang)
-                        full_audio_fp = io.BytesIO()
-                        tts.write_to_fp(full_audio_fp)
-                        full_audio_fp.seek(0)
+                        audio_data = asyncio.run(generate_edge_audio(st.session_state.extracted_full_text, voice_full_id))
+                        full_audio_fp = io.BytesIO(audio_data)
                         
                         st.audio(full_audio_fp, format="audio/mp3")
                         st.download_button(
