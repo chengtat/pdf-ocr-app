@@ -9,12 +9,12 @@ from gtts import gTTS
 import io
 
 # Page configuration
-st.set_page_config(page_title="Multilingual PDF OCR Studio", layout="wide")
+st.set_page_config(page_title="Multilingual PDF OCR Studio + TTS", layout="wide")
 
 st.title("📄 Multilingual PDF OCR Studio (EN / Chinese) + TTS")
-st.write("Upload a PDF document to extract text using RapidOCR and convert it to speech.")
+st.write("Upload a PDF document to extract text using RapidOCR and convert it to speech (Supports Mandarin, English, and Cantonese).")
 
-# Initialize Session State variables
+# Initialize Session State variables to persist results across reruns
 if "extracted_full_text" not in st.session_state:
     st.session_state.extracted_full_text = ""
 if "structured_data" not in st.session_state:
@@ -24,13 +24,20 @@ if "total_chinese_chars" not in st.session_state:
 if "total_english_words" not in st.session_state:
     st.session_state.total_english_words = 0
 
-# Sidebar Controls
+# Sidebar Controls for Advanced Features
 st.sidebar.header("⚙️ Processing Settings")
 mode = st.sidebar.radio("Extraction Mode", ["Full Document", "Single Page Preview"])
 show_bounding_boxes = st.sidebar.checkbox("Draw Bounding Boxes on Image", value=True)
 show_confidence = st.sidebar.checkbox("Show Text Confidence Scores", value=False)
 
-# Initialize RapidOCR engine (cached)
+# TTS Language Options Dictionary
+language_options = {
+    "廣東話 / 粵語 (zh-yue)": "zh-yue",
+    "普通話 / 簡體 (zh-CN)": "zh-CN",
+    "English (en)": "en",
+}
+
+# Initialize lightweight RapidOCR engine (cached)
 @st.cache_resource
 def load_ocr_engine():
     return RapidOCR()
@@ -38,6 +45,7 @@ def load_ocr_engine():
 with st.spinner("Loading OCR engine..."):
     ocr_engine = load_ocr_engine()
 
+# File uploader widget
 uploaded_file = st.file_uploader("Upload your PDF file here", type=["pdf"])
 
 if uploaded_file is not None:
@@ -45,6 +53,7 @@ if uploaded_file is not None:
     pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
     total_pages = len(pdf_document)
 
+    # Dashboard Metrics
     col1, col2, col3 = st.columns(3)
     col1.metric("Total Pages", total_pages)
     col2.metric("File Name", uploaded_file.name)
@@ -63,6 +72,7 @@ if uploaded_file is not None:
         col_img, col_txt = st.columns(2)
         with col_img:
             st.subheader(f"Page {page_num + 1} Preview")
+            
             if st.button("Run OCR & Draw Boxes"):
                 with st.spinner("Running OCR..."):
                     result, _ = ocr_engine(img_np)
@@ -88,10 +98,15 @@ if uploaded_file is not None:
                         
                         # --- 🔊 Text-to-Speech (gTTS) 整合 ---
                         st.markdown("### 🔊 Audio Playback")
-                        tts_lang = st.selectbox("Select TTS Language", ["zh-CN", "en"], index=0, key=f"tts_lang_{page_num}")
+                        selected_label = st.selectbox(
+                            "Select TTS Language", 
+                            options=list(language_options.keys()), 
+                            index=0, 
+                            key=f"tts_lang_{page_num}"
+                        )
+                        tts_lang = language_options[selected_label]
                         
                         try:
-                            # 記憶體中生成語音檔，不佔用硬碟空間
                             tts = gTTS(text=page_text, lang=tts_lang)
                             audio_fp = io.BytesIO()
                             tts.write_to_fp(audio_fp)
@@ -115,6 +130,11 @@ if uploaded_file is not None:
                             mime="text/plain",
                             key=f"download_txt_{page_num}"
                         )
+                        
+                        if show_confidence:
+                            st.write("**Confidence Scores:**")
+                            for line in result:
+                                st.caption(f"- `{line[1]}` (Confidence: {line[2]:.2f})")
                     else:
                         st.info("No text detected on this page.")
 
@@ -192,7 +212,13 @@ if uploaded_file is not None:
             
             # --- 全文語音轉檔 (TTS) ---
             st.markdown("### 🔊 Listen to Extracted Text (TTS)")
-            tts_full_lang = st.selectbox("Select TTS Language for Full Doc", ["zh-CN", "en"], index=0)
+            selected_full_label = st.selectbox(
+                "Select TTS Language for Full Doc",
+                options=list(language_options.keys()),
+                index=0
+            )
+            tts_full_lang = language_options[selected_full_label]
+            
             if st.button("Generate Audio for Full Document"):
                 with st.spinner("Generating MP3 audio..."):
                     try:
