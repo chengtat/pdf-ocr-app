@@ -9,6 +9,11 @@ import asyncio
 import edge_tts
 import tempfile
 import os
+import sys
+
+# 針對 Windows 平台的 Event Loop Policy 相容性設定
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 # Page configuration
 st.set_page_config(page_title="Multilingual PDF OCR Studio + Edge-TTS", layout="wide")
@@ -16,7 +21,7 @@ st.set_page_config(page_title="Multilingual PDF OCR Studio + Edge-TTS", layout="
 st.title("📄 Multilingual PDF OCR Studio + Edge-TTS")
 st.write("Upload a PDF document to extract text using RapidOCR and convert to high-quality speech (Supports Cantonese, Mandarin, and English).")
 
-# Initialize Session State variables to persist results across reruns
+# Initialize Session State variables
 if "extracted_full_text" not in st.session_state:
     st.session_state.extracted_full_text = ""
 if "structured_data" not in st.session_state:
@@ -48,7 +53,7 @@ def load_ocr_engine():
 with st.spinner("Loading OCR engine..."):
     ocr_engine = load_ocr_engine()
 
-# 🛠️ 修復版 Edge-TTS 函數：建立獨立 Event Loop 避開 Streamlit 執行緒死結
+# 🛠️ 穩健的 Edge-TTS 語音生成函數（獨立 Event Loop + 逾時防護）
 def generate_and_save_audio(text, voice_name):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -57,11 +62,15 @@ def generate_and_save_audio(text, voice_name):
         communicate = edge_tts.Communicate(text, voice_name)
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_file:
             tmp_path = tmp_file.name
-        await communicate.save(tmp_path)
+        await asyncio.wait_for(communicate.save(tmp_path), timeout=15.0)
         return tmp_path
 
     try:
         return loop.run_until_complete(_save())
+    except asyncio.TimeoutError:
+        raise Exception("TTS 連線逾時：請檢查網路連線或防火牆是否阻擋微軟語音 API。")
+    except Exception as e:
+        raise Exception(f"TTS 發生錯誤: {str(e)}")
     finally:
         loop.close()
 
@@ -93,75 +102,88 @@ if uploaded_file is not None:
         with col_img:
             st.subheader(f"Page {page_num + 1} Preview")
             
-            if st.button("Run OCR & Draw Boxes"):
-                with st.spinner("Running OCR..."):
-                    result, _ = ocr_engine(img_np)
-                    if result and show_bounding_boxes:
-                        annotated_img = img_np.copy()
-                        for line in result:
-                            box = np.array(line[0], dtype=np.int32)
-                            cv2.polylines(annotated_img, [box], isClosed=True, color=(0, 255, 0), thickness=2)
-                        st.image(annotated_img, use_container_width=True)
-                    else:
-                        st.image(img, use_container_width=True)
+            # 依據勾選狀態決定是否繪製 Bounding Boxes
+            if show_bounding_boxes:
+                result_preview, _ = ocr_engine(img_np)
+                annotated_img = img_np.copy()
+                if result_preview:
+                    for line in result_preview:
+                        box = np.array(line[0], dtype=np.int32)
+                        cv2.polylines(annotated_img, [box], isClosed=True, color=(0, 255, 0), thickness=2)
+                st.image(annotated_img, use_container_width=True)
             else:
                 st.image(img, use_container_width=True)
             
         with col_txt:
             st.subheader("Extracted Text & Speech")
-            if st.button("Extract Text Only"):
+            
+            # 1. 獨立的 OCR 觸發按鈕，將結果寫入 session_state 避免被重置
+            if st.button("Extract Text Only", key=f"extract_{page_num}"):
                 with st.spinner("Running OCR..."):
                     result, _ = ocr_engine(img_np)
                     if result:
-                        page_text = "\n".join([line[1] for line in result])
-                        st.text_area("Result", value=page_text, height=250)
-                        
-                        # --- 🔊 Edge-TTS 語音整合 ---
-                        st.markdown("### 🔊 Edge-TTS Audio Playback")
-                        selected_label = st.selectbox(
-                            "Select Voice", 
-                            options=list(voice_options.keys()), 
-                            index=0, 
-                            key=f"voice_{page_num}"
-                        )
-                        voice_id = voice_options[selected_label]
-                        
-                        if st.button("Generate Speech", key=f"gen_audio_{page_num}"):
-                            with st.spinner("Synthesizing audio..."):
-                                try:
-                                    audio_path = generate_and_save_audio(page_text, voice_id)
-                                    
-                                    with open(audio_path, "rb") as f:
-                                        audio_bytes = f.read()
-                                    
-                                    # 清理暫存檔
-                                    os.unlink(audio_path)
-                                    
-                                    st.audio(audio_bytes, format="audio/mp3")
-                                    st.download_button(
-                                        label="📥 Download Audio (.mp3)",
-                                        data=audio_bytes,
-                                        file_name=f"page_{page_num + 1}_audio.mp3",
-                                        mime="audio/mp3",
-                                        key=f"download_audio_{page_num}"
-                                    )
-                                except Exception as e:
-                                    st.error(f"TTS Error: {e}")
-                            
-                        st.download_button(
-                            label="📥 Download Page Text as .txt",
-                            data=page_text,
-                            file_name=f"page_{page_num + 1}_text.txt",
-                            mime="text/plain",
-                            key=f"download_txt_{page_num}"
-                        )
-                        
-                        if show_confidence:
-                            st.write("**Confidence Scores:**")
-                            for line in result:
-                                st.caption(f"- `{line[1]}` (Confidence: {line[2]:.2f})")
+                        st.session_state[f"page_text_{page_num}"] = "\n".join([line[1] for line in result])
+                        st.session_state[f"ocr_result_{page_num}"] = result
                     else:
-                        st.info("No text detected on this page.")
+                        st.session_state[f"page_text_{page_num}"] = ""
+                        st.session_state[f"ocr_result_{page_num}"] = None
+
+            # 2. 只要 session_state 中有資料，就常態性渲染文字區塊與 TTS 按鈕
+            text_key = f"page_text_{page_num}"
+            if text_key in st.session_state and st.session_state[text_key]:
+                page_text = st.session_state[text_key]
+                st.text_area("Result", value=page_text, height=250, key=f"textarea_{page_num}")
+                
+                # --- 🔊 Edge-TTS 語音整合 ---
+                st.markdown("### 🔊 Edge-TTS Audio Playback")
+                selected_label = st.selectbox(
+                    "Select Voice", 
+                    options=list(voice_options.keys()), 
+                    index=0, 
+                    key=f"voice_{page_num}"
+                )
+                voice_id = voice_options[selected_label]
+                
+                # 獨立的 TTS 按鈕，點擊後安全生成語音與播放器
+                if st.button("Generate Speech", key=f"gen_audio_{page_num}"):
+                    with st.spinner("Synthesizing audio... (please wait)"):
+                        try:
+                            audio_path = generate_and_save_audio(page_text, voice_id)
+                            
+                            with open(audio_path, "rb") as f:
+                                audio_bytes = f.read()
+                            
+                            # 清理暫存檔
+                            os.unlink(audio_path)
+                            
+                            # 渲染播放器與下載按鈕
+                            st.audio(audio_bytes, format="audio/mp3")
+                            st.download_button(
+                                label="📥 Download Audio (.mp3)",
+                                data=audio_bytes,
+                                file_name=f"page_{page_num + 1}_audio.mp3",
+                                mime="audio/mp3",
+                                key=f"download_audio_{page_num}"
+                            )
+                        except Exception as e:
+                            st.error(f"TTS Error: {e}")
+                
+                st.download_button(
+                    label="📥 Download Page Text as .txt",
+                    data=page_text,
+                    file_name=f"page_{page_num + 1}_text.txt",
+                    mime="text/plain",
+                    key=f"download_txt_{page_num}"
+                )
+                
+                if show_confidence and f"ocr_result_{page_num}" in st.session_state:
+                    result = st.session_state[f"ocr_result_{page_num}"]
+                    if result:
+                        st.write("**Confidence Scores:**")
+                        for line in result:
+                            st.caption(f"- `{line[1]}` (Confidence: {line[2]:.2f})")
+            else:
+                st.info("Click 'Extract Text Only' above to process this page.")
 
     else: # Full Document Mode
         if st.button("🚀 Start Full Document OCR Extraction", type="primary"):
@@ -245,7 +267,7 @@ if uploaded_file is not None:
             voice_full_id = voice_options[selected_full_label]
             
             if st.button("Generate Audio for Full Document"):
-                with st.spinner("Synthesizing full document audio..."):
+                with st.spinner("Synthesizing full document audio... (this may take a while)"):
                     try:
                         audio_path = generate_and_save_audio(st.session_state.extracted_full_text, voice_full_id)
                         
