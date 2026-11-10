@@ -4,6 +4,7 @@ rapidocr_onnxruntime>=1.3.0
 easyocr>=1.7.0
 pdfplumber>=0.10.0
 googletrans==4.0.0-rc1
+legacy-cgi
 Pillow>=10.0.0
 numpy>=1.24.0
 opencv-python-headless>=4.8.0
