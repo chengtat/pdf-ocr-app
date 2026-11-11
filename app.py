@@ -30,13 +30,6 @@ st.markdown("""
             border-radius: 6px;
             font-weight: 500;
         }
-        .metric-card {
-            background-color: #ffffff;
-            border: 1px solid #e0e0e0;
-            padding: 15px;
-            border-radius: 8px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -50,7 +43,8 @@ default_states = {
     "total_chinese_chars": 0,
     "total_english_words": 0,
     "single_page_results": {},
-    "page_tables": {}
+    "page_tables": {},
+    "translated_full_text": ""
 }
 
 for key, val in default_states.items():
@@ -134,8 +128,8 @@ with st.sidebar:
     
     with st.container(border=True):
         st.subheader("OCR Engine Setup")
-        engine_choice = st.selectbox("Backend Engine", ["RapidOCR", "EasyOCR"], help="RapidOCR is lightweight and fast; EasyOCR is great for varied fonts.")
-        dpi_setting = st.slider("Render Resolution (DPI)", 100, 300, 150, 50, help="Higher DPI improves OCR accuracy on small text.")
+        engine_choice = st.selectbox("Backend Engine", ["RapidOCR", "EasyOCR"])
+        dpi_setting = st.slider("Render Resolution (DPI)", 100, 300, 150, 50)
 
     with st.container(border=True):
         st.subheader("Visual Options")
@@ -166,7 +160,7 @@ if uploaded_file is not None:
 
     st.divider()
 
-    # --- Full Document Pre-extraction Trigger (if not done) ---
+    # --- Full Document Pre-extraction Trigger ---
     if not st.session_state.extracted_full_text:
         with st.container(border=True):
             st.subheader("🚀 Batch Processing")
@@ -198,8 +192,6 @@ if uploaded_file is not None:
                     
                     temp_full_text += f"\n\n--- Page {page_idx + 1} ---\n\n" + page_text
                     temp_structured_data.append({"page": page_idx + 1, "content": page_text, "lines": page_lines})
-                    
-                    # Store table data proactively
                     st.session_state.page_tables[page_idx] = extract_tables_from_pdf(pdf_bytes, page_idx)
                     
                     del img_np, result
@@ -354,50 +346,98 @@ if uploaded_file is not None:
         else:
             st.info(f"No structured tables detected on Page {table_page_sel + 1}.")
 
-    # --- TAB 4: AI TRANSLATION & AUDIO STUDIO ---
+    # --- TAB 4: AI TRANSLATION & AUDIO STUDIO (IMPROVED & CONNECTED) ---
     with tab_translate:
-        st.markdown("### Translation & Text-to-Speech Studio")
-        
-        col_trans, col_tts = st.columns(2, gap="medium")
-        
-        with col_trans:
-            with st.container(border=True):
-                st.subheader("🌐 AI Machine Translation")
-                trans_source_text = st.text_area("Text to Translate", value=st.session_state.extracted_full_text[:2000], height=200, key="trans_input")
-                target_lang = st.selectbox("Target Language", ["zh-cn", "zh-tw", "en", "ja", "fr", "de", "es"], key="studio_target_lang")
-                
-                if st.button("Translate Content", type="primary", key="btn_exec_trans"):
-                    with st.spinner("Translating via Google Translate API..."):
-                        try:
-                            translator = get_translator()
-                            res = translator.translate(trans_source_text, dest=target_lang)
-                            st.markdown(f"**Translated Output ({target_lang}):**")
-                            st.info(res.text)
-                        except Exception as e:
-                            st.error(f"Translation Error: {e}")
+        st.markdown("### 🌐 AI Translation & Audio Studio")
+        st.write("Easily translate or generate audio directly from your extracted text using the selector below.")
 
-        with col_tts:
-            with st.container(border=True):
-                st.subheader("🔊 Audio Synthesis (TTS)")
-                tts_source_text = st.text_area("Text to Synthesize", value=st.session_state.extracted_full_text[:2000], height=200, key="tts_input")
-                tts_lang = st.selectbox("Speech Language", ["zh-CN", "en"], key="studio_tts_lang")
-                
-                if st.button("Generate MP3 Audio", type="primary", key="btn_exec_tts"):
-                    with st.spinner("Synthesizing speech audio..."):
-                        try:
-                            audio_stream = generate_audio(tts_source_text, tts_lang)
-                            audio_bytes = audio_stream.getvalue()
-                            
-                            st.audio(audio_bytes, format="audio/mp3")
-                            st.download_button(
-                                label="📥 Download Generated Audio (.mp3)",
-                                data=audio_bytes,
-                                file_name="studio_audio.mp3",
-                                mime="audio/mp3",
-                                use_container_width=True,
-                                key="btn_dl_studio_audio"
-                            )
-                        except Exception as e:
-                            st.error(f"TTS Audio Generation Error: {e}")
+        if not st.session_state.extracted_full_text:
+            st.warning("Please run Full Document OCR extraction first or scan a page to use the Studio.")
+        else:
+            # Source Selection Selector
+            source_choice = st.radio(
+                "Choose Source Content to Process:",
+                ["Entire Extracted Document", "Specific Page Text"],
+                horizontal=True
+            )
+
+            if source_choice == "Entire Extracted Document":
+                active_text = st.session_state.extracted_full_text
+            else:
+                target_page_idx = st.selectbox("Select Page Source", range(total_pages), format_func=lambda x: f"Page {x + 1}")
+                if target_page_idx in st.session_state.single_page_results:
+                    res_lines = st.session_state.single_page_results[target_page_idx]["result"]
+                    active_text = "\n".join([line[1] for line in res_lines]) if res_lines else ""
+                else:
+                    active_text = "Page has not been scanned yet. Run OCR in the Page Studio tab or run Full Extraction."
+
+            col_trans, col_tts = st.columns(2, gap="medium")
+
+            with col_trans:
+                with st.container(border=True):
+                    st.subheader("🌐 Machine Translation")
+                    st.text_area("Source Text Preview", value=active_text[:1000] + ("..." if len(active_text) > 1000 else ""), height=150, disabled=True)
+                    
+                    target_lang = st.selectbox("Target Language", ["zh-cn", "zh-tw", "en", "ja", "fr", "de", "es"], key="studio_target_lang")
+                    
+                    if st.button("🚀 Translate Selected Content", type="primary", key="btn_exec_trans"):
+                        with st.spinner("Translating via Google Translate API..."):
+                            try:
+                                translator = get_translator()
+                                # Googletrans has a safe chunk limit, split if too long
+                                max_len = 4500
+                                text_chunks = [active_text[i:i + max_len] for i in range(0, len(active_text), max_len)]
+                                translated_result = ""
+                                for chunk in text_chunks:
+                                    res = translator.translate(chunk, dest=target_lang)
+                                    translated_result += res.text + "\n"
+                                
+                                st.session_state.translated_full_text = translated_result
+                                st.success("Translation complete!")
+                            except Exception as e:
+                                st.error(f"Translation Error: {e}")
+
+                    if st.session_state.translated_full_text:
+                        st.markdown("**Translated Result:**")
+                        st.text_area("Translated Output", value=st.session_state.translated_full_text, height=200, key="trans_output_box")
+                        st.download_button(
+                            label="📥 Download Translated Text (.txt)",
+                            data=st.session_state.translated_full_text,
+                            file_name="translated_output.txt",
+                            mime="text/plain",
+                            use_container_width=True
+                        )
+
+            with col_tts:
+                with st.container(border=True):
+                    st.subheader("🔊 Audio Synthesis (TTS)")
+                    tts_source_mode = st.radio("Synthesize Voice From:", ["Original Source Text", "Translated Text Result"], horizontal=True, key="tts_src_mode")
+                    
+                    tts_active_text = active_text if tts_source_mode == "Original Source Text" else st.session_state.translated_full_text
+                    
+                    st.text_area("Voice Input Preview", value=tts_active_text[:1000] + ("..." if len(tts_active_text) > 1000 else ""), height=150, disabled=True)
+                    
+                    tts_lang = st.selectbox("Speech Language", ["zh-CN", "en"], key="studio_tts_lang")
+                    
+                    if st.button("🎙️ Generate MP3 Audio", type="primary", key="btn_exec_tts"):
+                        if not tts_active_text.strip() or "not been scanned" in tts_active_text:
+                            st.error("Selected text is empty or invalid for speech synthesis.")
+                        else:
+                            with st.spinner("Synthesizing speech audio..."):
+                                try:
+                                    audio_stream = generate_audio(tts_active_text, tts_lang)
+                                    audio_bytes = audio_stream.getvalue()
+                                    
+                                    st.audio(audio_bytes, format="audio/mp3")
+                                    st.download_button(
+                                        label="📥 Download Generated Audio (.mp3)",
+                                        data=audio_bytes,
+                                        file_name="studio_audio.mp3",
+                                        mime="audio/mp3",
+                                        use_container_width=True,
+                                        key="btn_dl_studio_audio"
+                                    )
+                                except Exception as e:
+                                    st.error(f"TTS Audio Generation Error: {e}")
 
     pdf_document.close()
