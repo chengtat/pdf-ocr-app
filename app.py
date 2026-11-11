@@ -64,7 +64,8 @@ default_states = {
     "single_page_results": {},
     "page_tables": {},
     "translated_full_text": "",
-    "last_uploaded_filename": None
+    "last_uploaded_filename": None,
+    "last_target_lang": "zh-cn"
 }
 
 for key, val in default_states.items():
@@ -146,7 +147,6 @@ def highlight_text(text, query):
     """將文字中的搜尋關鍵字用 <mark> 標籤包覆以實現高亮"""
     if not query.strip() or not text:
         return text
-    # 使用 re.sub 進行不分大小寫的替換
     escaped_query = re.escape(query)
     highlighted = re.sub(
         f"({escaped_query})",
@@ -181,7 +181,6 @@ with st.sidebar:
 uploaded_file = st.file_uploader("📂 Upload PDF Document", type=["pdf"])
 
 if uploaded_file is not None:
-    # 檢查是否為新上傳的檔案，若是則清空舊狀態
     if st.session_state.last_uploaded_filename != uploaded_file.name:
         st.session_state.extracted_full_text = ""
         st.session_state.structured_data = []
@@ -294,8 +293,6 @@ if uploaded_file is not None:
                 )
 
             st.markdown("### 📝 Full Text View (with Keyword Highlighting)")
-            
-            # 處理並渲染高亮文本
             highlighted_html = highlight_text(st.session_state.extracted_full_text, search_query)
             st.markdown(f'<div class="highlight-box">{highlighted_html}</div>', unsafe_allow_html=True)
         else:
@@ -425,8 +422,17 @@ if uploaded_file is not None:
                     st.subheader("🌐 Machine Translation")
                     st.text_area("Source Text Preview", value=active_text[:1000] + ("..." if len(active_text) > 1000 else ""), height=150, disabled=True)
                     
-                    target_lang = st.selectbox("Target Language", ["zh-cn", "zh-tw", "en", "ja", "fr", "de", "es"], key="studio_target_lang")
+                    target_lang = st.selectbox(
+                        "Target Language", 
+                        ["zh-cn", "zh-tw", "en", "ja", "fr", "de", "es"], 
+                        key="studio_target_lang"
+                    )
                     
+                    # 偵測目標語言是否被更換，若更換則自動清空舊翻譯結果以避免混淆
+                    if st.session_state.get("last_target_lang") != target_lang:
+                        st.session_state.translated_full_text = ""
+                        st.session_state.last_target_lang = target_lang
+
                     if st.button("🚀 Translate Selected Content", type="primary", key="btn_exec_trans"):
                         with st.spinner("Translating via Google Translate API..."):
                             try:
@@ -449,7 +455,7 @@ if uploaded_file is not None:
                         st.download_button(
                             label="📥 Download Translated Text (.txt)",
                             data=st.session_state.translated_full_text,
-                            file_name="translated_output.txt",
+                            file_name=f"translated_to_{target_lang}.txt",
                             mime="text/plain",
                             use_container_width=True
                         )
