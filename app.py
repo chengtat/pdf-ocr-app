@@ -30,6 +30,25 @@ st.markdown("""
             border-radius: 6px;
             font-weight: 500;
         }
+        /* 關鍵字高亮樣式 */
+        mark {
+            background-color: #ffeb3b;
+            color: #000000;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-weight: bold;
+        }
+        .highlight-box {
+            background-color: #ffffff;
+            border: 1px solid #e0e0e0;
+            padding: 20px;
+            border-radius: 8px;
+            max-height: 500px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            font-family: monospace;
+            line-height: 1.5;
+        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -123,6 +142,20 @@ def extract_tables_from_pdf(pdf_bytes, page_idx):
                     tables_data.append(df)
     return tables_data
 
+def highlight_text(text, query):
+    """將文字中的搜尋關鍵字用 <mark> 標籤包覆以實現高亮"""
+    if not query.strip() or not text:
+        return text
+    # 使用 re.sub 進行不分大小寫的替換
+    escaped_query = re.escape(query)
+    highlighted = re.sub(
+        f"({escaped_query})",
+        r"<mark>\1</mark>",
+        text,
+        flags=re.IGNORECASE
+    )
+    return highlighted
+
 # --- Sidebar Configuration Hub ---
 with st.sidebar:
     st.header("⚙️ Studio Control Panel")
@@ -148,7 +181,7 @@ with st.sidebar:
 uploaded_file = st.file_uploader("📂 Upload PDF Document", type=["pdf"])
 
 if uploaded_file is not None:
-    # --- Check if a brand new file is uploaded to clear old session caches ---
+    # 檢查是否為新上傳的檔案，若是則清空舊狀態
     if st.session_state.last_uploaded_filename != uploaded_file.name:
         st.session_state.extracted_full_text = ""
         st.session_state.structured_data = []
@@ -260,8 +293,11 @@ if uploaded_file is not None:
                     use_container_width=True
                 )
 
-            st.markdown("### 📝 Full Text View")
-            st.text_area("Full Content", value=st.session_state.extracted_full_text, height=400, label_visibility="collapsed")
+            st.markdown("### 📝 Full Text View (with Keyword Highlighting)")
+            
+            # 處理並渲染高亮文本
+            highlighted_html = highlight_text(st.session_state.extracted_full_text, search_query)
+            st.markdown(f'<div class="highlight-box">{highlighted_html}</div>', unsafe_allow_html=True)
         else:
             st.info("Run the batch extraction above to populate the document overview.")
 
