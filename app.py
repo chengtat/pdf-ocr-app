@@ -44,7 +44,8 @@ default_states = {
     "total_english_words": 0,
     "single_page_results": {},
     "page_tables": {},
-    "translated_full_text": ""
+    "translated_full_text": "",
+    "last_uploaded_filename": None
 }
 
 for key, val in default_states.items():
@@ -147,6 +148,17 @@ with st.sidebar:
 uploaded_file = st.file_uploader("📂 Upload PDF Document", type=["pdf"])
 
 if uploaded_file is not None:
+    # --- Check if a brand new file is uploaded to clear old session caches ---
+    if st.session_state.last_uploaded_filename != uploaded_file.name:
+        st.session_state.extracted_full_text = ""
+        st.session_state.structured_data = []
+        st.session_state.total_chinese_chars = 0
+        st.session_state.total_english_words = 0
+        st.session_state.single_page_results = {}
+        st.session_state.page_tables = {}
+        st.session_state.translated_full_text = ""
+        st.session_state.last_uploaded_filename = uploaded_file.name
+
     pdf_bytes = uploaded_file.read()
     pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
     total_pages = len(pdf_document)
@@ -346,7 +358,7 @@ if uploaded_file is not None:
         else:
             st.info(f"No structured tables detected on Page {table_page_sel + 1}.")
 
-    # --- TAB 4: AI TRANSLATION & AUDIO STUDIO (IMPROVED & CONNECTED) ---
+    # --- TAB 4: AI TRANSLATION & AUDIO STUDIO ---
     with tab_translate:
         st.markdown("### 🌐 AI Translation & Audio Studio")
         st.write("Easily translate or generate audio directly from your extracted text using the selector below.")
@@ -354,7 +366,6 @@ if uploaded_file is not None:
         if not st.session_state.extracted_full_text:
             st.warning("Please run Full Document OCR extraction first or scan a page to use the Studio.")
         else:
-            # Source Selection Selector
             source_choice = st.radio(
                 "Choose Source Content to Process:",
                 ["Entire Extracted Document", "Specific Page Text"],
@@ -384,7 +395,6 @@ if uploaded_file is not None:
                         with st.spinner("Translating via Google Translate API..."):
                             try:
                                 translator = get_translator()
-                                # Googletrans has a safe chunk limit, split if too long
                                 max_len = 4500
                                 text_chunks = [active_text[i:i + max_len] for i in range(0, len(active_text), max_len)]
                                 translated_result = ""
