@@ -20,8 +20,28 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("📄 Multilingual PDF OCR Studio Pro (EN / Chinese) + TTS")
-st.write("Extract text, analyze tabular data, inspect bounding boxes, translate, and synthesize audio with AI.")
+# --- Custom Modern UI Styling ---
+st.markdown("""
+    <style>
+        .main {
+            background-color: #f8f9fa;
+        }
+        .stButton>button {
+            border-radius: 6px;
+            font-weight: 500;
+        }
+        .metric-card {
+            background-color: #ffffff;
+            border: 1px solid #e0e0e0;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+st.title("📄 Multilingual PDF OCR Studio Pro")
+st.caption("Advanced OCR, Table Extraction, Bounding Box Inspector, Translation & Text-to-Speech Engine")
 
 # --- Session State Initialization ---
 default_states = {
@@ -53,10 +73,8 @@ def get_translator():
 
 # --- Helper Functions ---
 def generate_audio(text: str, lang: str) -> io.BytesIO:
-    """Converts text to MP3 audio stream with automatic payload chunking."""
     if not text.strip():
         raise ValueError("Text content is empty.")
-    
     max_chunk = 4000
     if len(text) > max_chunk:
         chunks = [text[i:i + max_chunk] for i in range(0, len(text), max_chunk)]
@@ -77,15 +95,13 @@ def generate_audio(text: str, lang: str) -> io.BytesIO:
         return audio_fp
 
 def process_ocr(img_np, engine_type="RapidOCR"):
-    """Executes OCR scan based on selected engine, returning unified result format."""
     if engine_type == "RapidOCR":
         ocr_engine = load_rapidocr_engine()
         result, _ = ocr_engine(img_np)
         return result
-    else: # EasyOCR
+    else:
         reader = load_easyocr_engine()
         raw_result = reader.readtext(img_np)
-        # Format EasyOCR [bbox, text, conf] to match RapidOCR output structure [[bbox], text, conf]
         formatted_result = []
         for box, text, conf in raw_result:
             formatted_box = [[int(pt[0]), int(pt[1])] for pt in box]
@@ -93,7 +109,6 @@ def process_ocr(img_np, engine_type="RapidOCR"):
         return formatted_result
 
 def process_page(page, dpi=150, engine_type="RapidOCR"):
-    """Renders PDF page to array and executes OCR processing."""
     pix = page.get_pixmap(dpi=dpi)
     img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
     img_np = np.array(img)
@@ -102,7 +117,6 @@ def process_page(page, dpi=150, engine_type="RapidOCR"):
     return img_np, result
 
 def extract_tables_from_pdf(pdf_bytes, page_idx):
-    """Extracts tables from a target page using pdfplumber."""
     tables_data = []
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         if page_idx < len(pdf.pages):
@@ -114,311 +128,276 @@ def extract_tables_from_pdf(pdf_bytes, page_idx):
                     tables_data.append(df)
     return tables_data
 
-# --- Sidebar Controls ---
-st.sidebar.header("⚙️ Processing Settings")
-engine_choice = st.sidebar.selectbox("OCR Engine Backend", ["RapidOCR", "EasyOCR"])
-mode = st.sidebar.radio("Extraction Mode", ["Full Document", "Single Page Preview"])
-show_bounding_boxes = st.sidebar.checkbox("Draw Bounding Boxes on Image", value=True)
-show_confidence = st.sidebar.checkbox("Show Text Confidence Scores", value=True)
+# --- Sidebar Configuration Hub ---
+with st.sidebar:
+    st.header("⚙️ Studio Control Panel")
+    
+    with st.container(border=True):
+        st.subheader("OCR Engine Setup")
+        engine_choice = st.selectbox("Backend Engine", ["RapidOCR", "EasyOCR"], help="RapidOCR is lightweight and fast; EasyOCR is great for varied fonts.")
+        dpi_setting = st.slider("Render Resolution (DPI)", 100, 300, 150, 50, help="Higher DPI improves OCR accuracy on small text.")
 
-st.sidebar.divider()
-st.sidebar.header("🔍 Keyword Search & Highlight")
-search_query = st.sidebar.text_input("Search document for text:", placeholder="Type word or pattern...")
+    with st.container(border=True):
+        st.subheader("Visual Options")
+        show_bounding_boxes = st.checkbox("Draw Bounding Boxes", value=True)
+        show_confidence = st.checkbox("Show Confidence Scores", value=True)
 
-# --- Main File Upload Area ---
-uploaded_file = st.file_uploader("Upload your PDF file here", type=["pdf"])
+    with st.container(border=True):
+        st.subheader("🔍 Keyword Search")
+        search_query = st.text_input("Find in document:", placeholder="Type keyword...")
+
+    st.markdown("---")
+    st.info("💡 **Tip:** Upload your multi-page bilingual PDF below to initialize the workspace.")
+
+# --- Main File Uploader Area ---
+uploaded_file = st.file_uploader("📂 Upload PDF Document", type=["pdf"])
 
 if uploaded_file is not None:
     pdf_bytes = uploaded_file.read()
     pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
     total_pages = len(pdf_document)
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Total Pages", total_pages)
-    col2.metric("File Name", uploaded_file.name)
-    col3.metric("Selected Engine", engine_choice)
+    # Top Status Bar Metrics
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("📄 File Name", uploaded_file.name)
+    col2.metric("📊 Total Pages", total_pages)
+    col3.metric("⚡ Active Engine", engine_choice)
+    col4.metric("Resolution", f"{dpi_setting} DPI")
 
     st.divider()
 
-    # =========================================================================
-    # SINGLE PAGE PREVIEW MODE
-    # =========================================================================
-    if mode == "Single Page Preview":
-        page_num = st.sidebar.slider("Select Page to Preview", 1, total_pages, 1) - 1
-        page = pdf_document[page_num]
-        
-        col_img, col_txt = st.columns(2)
-        
-        with col_img:
-            st.subheader(f"Page {page_num + 1} Visual Output")
-            run_preview = st.button("🔍 Run Page OCR", type="primary", key=f"run_page_{page_num}")
-            
-            if run_preview or page_num in st.session_state.single_page_results:
-                if run_preview or page_num not in st.session_state.single_page_results:
-                    with st.spinner(f"Running {engine_choice}..."):
-                        img_np, result = process_page(page, dpi=150, engine_type=engine_choice)
-                        st.session_state.single_page_results[page_num] = {
-                            "img_np": img_np,
-                            "result": result
-                        }
-                        # Extract tabular data
-                        st.session_state.page_tables[page_num] = extract_tables_from_pdf(pdf_bytes, page_num)
+    # --- Full Document Pre-extraction Trigger (if not done) ---
+    if not st.session_state.extracted_full_text:
+        with st.container(border=True):
+            st.subheader("🚀 Batch Processing")
+            st.write("Click below to run full document scanning across all pages instantly.")
+            if st.button("Start Full Document OCR Extraction", type="primary"):
+                progress_bar = st.progress(0)
+                status_text = st.empty()
                 
-                cached_data = st.session_state.single_page_results[page_num]
-                img_np = cached_data["img_np"]
-                result = cached_data["result"]
+                temp_full_text = ""
+                temp_structured_data = []
+                temp_chinese_chars = 0
+                temp_english_words = 0
                 
-                if result and show_bounding_boxes:
-                    annotated_img = img_np.copy()
-                    for idx, line in enumerate(result):
-                        box = np.array(line[0], dtype=np.int32)
-                        cv2.polylines(annotated_img, [box], isClosed=True, color=(0, 255, 0), thickness=2)
-                        # Add index overlay number for bounding box inspector
-                        cv2.putText(annotated_img, str(idx), (int(box[0][0]), int(box[0][1]) - 5),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
-                    st.image(annotated_img, use_container_width=True)
-                else:
-                    st.image(img_np, use_container_width=True)
-            else:
-                pix = page.get_pixmap(dpi=100)
-                preview_img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-                st.image(preview_img, use_container_width=True)
-
-        with col_txt:
-            st.subheader("Extracted Text & Speech")
-            if page_num in st.session_state.single_page_results:
-                result = st.session_state.single_page_results[page_num]["result"]
-                
-                if result:
-                    page_text = "\n".join([line[1] for line in result])
+                for page_idx in range(total_pages):
+                    status_text.text(f"Processing page {page_idx + 1} of {total_pages}...")
+                    page = pdf_document[page_idx]
+                    img_np, result = process_page(page, dpi=dpi_setting, engine_type=engine_choice)
                     
-                    # Highlight keyword search matches if entered
-                    if search_query.strip():
-                        matches = len(re.findall(re.escape(search_query), page_text, re.IGNORECASE))
-                        if matches > 0:
-                            st.success(f"Found **{matches}** match(es) for '{search_query}' on this page.")
-                        else:
-                            st.warning(f"No matches for '{search_query}' on this page.")
-
-                    st.text_area("OCR Result Text", value=page_text, height=200, key=f"txt_area_{page_num}")
+                    page_lines = []
+                    page_text = ""
+                    if result:
+                        page_text = "\n".join([line[1] for line in result])
+                        for line in result:
+                            text_val = line[1]
+                            temp_chinese_chars += sum(1 for c in text_val if '\u4e00' <= c <= '\u9fff')
+                            temp_english_words += len([w for w in text_val.split() if w.isascii() and w.isalpha()])
+                            if show_confidence:
+                                page_lines.append({"text": text_val, "confidence": float(line[2])})
                     
-                    # --- ENHANCEMENT: Interactive Bounding Box Inspector & Inline Correction ---
-                    with st.expander("🛠️ Bounding Box Inspector & Text Corrector", expanded=False):
-                        line_options = [f"Line {idx}: {line[1]} (Conf: {float(line[2]):.2f})" for idx, line in enumerate(result)]
-                        selected_idx = st.selectbox("Select Line to Inspect / Edit:", range(len(result)), format_func=lambda x: line_options[x])
-                        
-                        target_line = result[selected_idx]
-                        st.write(f"**Bounding Box Polygon:** `{target_line[0]}`")
-                        
-                        corrected_val = st.text_input("Correct Extracted Line Text:", value=target_line[1], key=f"edit_line_{page_num}_{selected_idx}")
-                        if st.button("Save Line Correction", key=f"save_line_{page_num}_{selected_idx}"):
-                            st.session_state.single_page_results[page_num]["result"][selected_idx][1] = corrected_val
-                            st.success("Line corrected! Refreshing...")
-                            st.rerun()
-
-                    if show_confidence:
-                        with st.expander("🔍 Detailed Confidence Metrics", expanded=False):
-                            for line in result:
-                                st.write(f"- `{line[1]}` (Confidence: **{float(line[2]):.4f}**)")
-
-                    # --- ENHANCEMENT: Table Detection & CSV Export ---
-                    tables = st.session_state.page_tables.get(page_num, [])
-                    if tables:
-                        st.markdown("### 📊 Extracted Tables on Page")
-                        for idx, df in enumerate(tables):
-                            st.write(f"**Table {idx + 1}**")
-                            st.dataframe(df, use_container_width=True)
-                            csv_data = df.to_csv(index=False).encode('utf-8')
-                            st.download_button(
-                                label=f"📥 Download Table {idx + 1} as CSV",
-                                data=csv_data,
-                                file_name=f"page_{page_num + 1}_table_{idx + 1}.csv",
-                                mime="text/csv",
-                                key=f"dl_table_{page_num}_{idx}"
-                            )
-
-                    # --- ENHANCEMENT: AI Translation Panel ---
-                    st.markdown("---")
-                    st.markdown("### 🌐 AI Machine Translation")
-                    target_lang = st.selectbox(
-                        "Target Language",
-                        ["zh-cn", "zh-tw", "en", "ja", "fr", "de", "es"],
-                        key=f"trans_lang_{page_num}"
-                    )
-                    if st.button("Translate Text", key=f"btn_trans_{page_num}"):
-                        with st.spinner("Translating..."):
-                            try:
-                                translator = get_translator()
-                                translated = translator.translate(page_text, dest=target_lang)
-                                st.info(f"**Translation ({target_lang}):**\n\n{translated.text}")
-                            except Exception as e:
-                                st.error(f"Translation Error: {e}")
-
-                    st.markdown("---")
-                    st.markdown("### 🔊 Text-to-Speech")
-                    tts_lang = st.selectbox("Select Language", ["zh-CN", "en"], index=0, key=f"tts_lang_{page_num}")
+                    temp_full_text += f"\n\n--- Page {page_idx + 1} ---\n\n" + page_text
+                    temp_structured_data.append({"page": page_idx + 1, "content": page_text, "lines": page_lines})
                     
-                    if st.button("▶️ Generate Audio", key=f"gen_aud_{page_num}"):
-                        with st.spinner("Synthesizing audio..."):
-                            try:
-                                audio_stream = generate_audio(page_text, tts_lang)
-                                audio_bytes = audio_stream.getvalue()
-                                
-                                st.audio(audio_bytes, format="audio/mp3")
-                                st.download_button(
-                                    label="📥 Download Audio (.mp3)",
-                                    data=audio_bytes,
-                                    file_name=f"page_{page_num + 1}_audio.mp3",
-                                    mime="audio/mp3",
-                                    key=f"dl_aud_btn_{page_num}"
-                                )
-                            except Exception as e:
-                                st.error(f"TTS Error: {e}")
+                    # Store table data proactively
+                    st.session_state.page_tables[page_idx] = extract_tables_from_pdf(pdf_bytes, page_idx)
+                    
+                    del img_np, result
+                    gc.collect()
+                    progress_bar.progress((page_idx + 1) / total_pages)
+                
+                st.session_state.extracted_full_text = temp_full_text
+                st.session_state.structured_data = temp_structured_data
+                st.session_state.total_chinese_chars = temp_chinese_chars
+                st.session_state.total_english_words = temp_english_words
+                status_text.text("Extraction complete!")
+                st.success("Document scanned successfully!")
+                st.rerun()
 
-                    st.download_button(
-                        label="📥 Download Page Text (.txt)",
-                        data=page_text,
-                        file_name=f"page_{page_num + 1}_text.txt",
-                        mime="text/plain",
-                        key=f"dl_txt_btn_{page_num}"
-                    )
-                else:
-                    st.info("No text detected on this page.")
-            else:
-                st.info("Click 'Run Page OCR' on the left panel to begin scanning.")
+    # --- Modern Multi-Tab Studio Workspace ---
+    tab_overview, tab_preview, tab_tables, tab_translate = st.tabs([
+        "📑 Document Overview & Export",
+        "🔍 Page Studio & Bounding Boxes",
+        "📊 Table Data Analytics",
+        "🌐 AI Translation & Audio Studio"
+    ])
 
-    # =========================================================================
-    # FULL DOCUMENT MODE
-    # =========================================================================
-    else:
-        if st.button("🚀 Start Full Document OCR Extraction", type="primary"):
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            temp_full_text = ""
-            temp_structured_data = []
-            temp_chinese_chars = 0
-            temp_english_words = 0
-            
-            for page_idx in range(total_pages):
-                status_text.text(f"Processing page {page_idx + 1} of {total_pages} using {engine_choice}...")
-                page = pdf_document[page_idx]
-                
-                img_np, result = process_page(page, dpi=150, engine_type=engine_choice)
-                
-                page_lines = []
-                page_text = ""
-                
-                if result:
-                    page_text = "\n".join([line[1] for line in result])
-                    for line in result:
-                        text_val = line[1]
-                        temp_chinese_chars += sum(1 for c in text_val if '\u4e00' <= c <= '\u9fff')
-                        temp_english_words += len([w for w in text_val.split() if w.isascii() and w.isalpha()])
-                        
-                        if show_confidence:
-                            page_lines.append({
-                                "text": text_val,
-                                "confidence": float(line[2])
-                            })
-                
-                temp_full_text += f"\n\n--- Page {page_idx + 1} ---\n\n" + page_text
-                temp_structured_data.append({
-                    "page": page_idx + 1,
-                    "content": page_text,
-                    "lines": page_lines
-                })
-                
-                del img_np, result
-                gc.collect()
-                progress_bar.progress((page_idx + 1) / total_pages)
-            
-            st.session_state.extracted_full_text = temp_full_text
-            st.session_state.structured_data = temp_structured_data
-            st.session_state.total_chinese_chars = temp_chinese_chars
-            st.session_state.total_english_words = temp_english_words
-            
-            status_text.text("OCR Processing Complete!")
-            st.success("All pages successfully processed!")
-
+    # --- TAB 1: OVERVIEW & EXPORT ---
+    with tab_overview:
+        st.markdown("### Document Analytics & Full Export")
         if st.session_state.extracted_full_text:
-            # --- Keyword Search Summary Banner ---
             if search_query.strip():
-                full_text = st.session_state.extracted_full_text
-                total_matches = len(re.findall(re.escape(search_query), full_text, re.IGNORECASE))
-                st.info(f"🔍 Found **{total_matches}** total occurrence(s) of **'{search_query}'** across the document.")
+                matches = len(re.findall(re.escape(search_query), st.session_state.extracted_full_text, re.IGNORECASE))
+                st.success(f"🔍 Found **{matches}** match(es) for **'{search_query}'** in the full document.")
 
-            with st.expander("📊 Document Text Analytics", expanded=True):
-                stat_col1, stat_col2, stat_col3 = st.columns(3)
-                stat_col1.metric("Total Characters", len(st.session_state.extracted_full_text))
-                stat_col2.metric("Estimated Chinese Characters", st.session_state.total_chinese_chars)
-                stat_col3.metric("Estimated English Words", st.session_state.total_english_words)
+            col_m1, col_m2, col_m3 = st.columns(3)
+            col_m1.metric("Total Characters", len(st.session_state.extracted_full_text))
+            col_m2.metric("Chinese Characters", st.session_state.total_chinese_chars)
+            col_m3.metric("English Words", st.session_state.total_english_words)
 
-            st.markdown("### 📥 Export Options & Text-to-Speech")
-            export_col1, export_col2 = st.columns(2)
-            
-            with export_col1:
+            st.markdown("---")
+            col_d1, col_d2 = st.columns(2)
+            with col_d1:
                 st.download_button(
                     label="📄 Download Full Text (.txt)",
                     data=st.session_state.extracted_full_text,
                     file_name="extracted_ocr_text.txt",
                     mime="text/plain",
-                    type="primary"
+                    type="primary",
+                    use_container_width=True
                 )
-            with export_col2:
+            with col_d2:
                 json_string = json.dumps(st.session_state.structured_data, ensure_ascii=False, indent=4)
                 st.download_button(
                     label="📊 Download Structured Data (.json)",
                     data=json_string,
                     file_name="extracted_ocr_data.json",
-                    mime="application/json"
+                    mime="application/json",
+                    use_container_width=True
                 )
+
+            st.markdown("### 📝 Full Text View")
+            st.text_area("Full Content", value=st.session_state.extracted_full_text, height=400, label_visibility="collapsed")
+        else:
+            st.info("Run the batch extraction above to populate the document overview.")
+
+    # --- TAB 2: PAGE STUDIO & BOUNDING BOXES ---
+    with tab_preview:
+        st.markdown("### Single Page Visual Inspector & Line Corrector")
+        page_num = st.slider("Select Page to Inspect", 1, total_pages, 1, key="preview_page_slider") - 1
+        page = pdf_document[page_num]
+
+        col_img, col_txt = st.columns(2, gap="medium")
+
+        with col_img:
+            with st.container(border=True):
+                st.subheader(f"Page {page_num + 1} Visual Canvas")
+                run_page_btn = st.button("🔍 Run Page OCR", type="primary", key=f"btn_run_page_{page_num}")
+                
+                if run_page_btn or page_num in st.session_state.single_page_results:
+                    if run_page_btn or page_num not in st.session_state.single_page_results:
+                        with st.spinner("Processing page layout..."):
+                            img_np, result = process_page(page, dpi=dpi_setting, engine_type=engine_choice)
+                            st.session_state.single_page_results[page_num] = {"img_np": img_np, "result": result}
+                            if page_num not in st.session_state.page_tables:
+                                st.session_state.page_tables[page_num] = extract_tables_from_pdf(pdf_bytes, page_num)
+                    
+                    cached = st.session_state.single_page_results[page_num]
+                    img_np, result = cached["img_np"], cached["result"]
+                    
+                    if result and show_bounding_boxes:
+                        annotated_img = img_np.copy()
+                        for idx, line in enumerate(result):
+                            box = np.array(line[0], dtype=np.int32)
+                            cv2.polylines(annotated_img, [box], isClosed=True, color=(0, 255, 0), thickness=2)
+                            cv2.putText(annotated_img, str(idx), (int(box[0][0]), max(15, int(box[0][1]) - 5)),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+                        st.image(annotated_img, use_container_width=True)
+                    else:
+                        st.image(img_np, use_container_width=True)
+                else:
+                    pix = page.get_pixmap(dpi=100)
+                    st.image(Image.frombytes("RGB", [pix.width, pix.height], pix.samples), use_container_width=True)
+
+        with col_txt:
+            with st.container(border=True):
+                st.subheader("Extracted Line Editor")
+                if page_num in st.session_state.single_page_results:
+                    result = st.session_state.single_page_results[page_num]["result"]
+                    if result:
+                        page_text = "\n".join([line[1] for line in result])
+                        st.text_area("Page Text", value=page_text, height=180, key=f"page_txt_area_{page_num}")
+
+                        with st.expander("🛠️ Interactive Line Bounding Box Corrector"):
+                            line_options = [f"[{i}] {line[1][:30]}... (Conf: {float(line[2]):.2f})" for i, line in enumerate(result)]
+                            selected_line_idx = st.selectbox("Select Line Index:", range(len(result)), format_func=lambda x: line_options[x], key=f"sel_line_{page_num}")
+                            
+                            target_line = result[selected_line_idx]
+                            corrected_input = st.text_input("Edit Line Text:", value=target_line[1], key=f"edit_val_{page_num}_{selected_line_idx}")
+                            if st.button("Save Correction", key=f"save_edit_{page_num}_{selected_line_idx}"):
+                                st.session_state.single_page_results[page_num]["result"][selected_line_idx][1] = corrected_input
+                                st.success("Updated successfully!")
+                                st.rerun()
+
+                        if show_confidence:
+                            with st.expander("🔍 View Line Confidence Scores"):
+                                for line in result:
+                                    st.write(f"- `{line[1]}` — **{float(line[2]):.4f}**")
+                    else:
+                        st.info("No text detected on this page.")
+                else:
+                    st.info("Click 'Run Page OCR' to scan this specific page.")
+
+    # --- TAB 3: TABLE DATA ANALYTICS ---
+    with tab_tables:
+        st.markdown("### Auto-Detected Tables & CSV Export")
+        table_page_sel = st.selectbox("Select Page for Table Inspection", range(total_pages), format_func=lambda x: f"Page {x + 1}")
+        
+        if table_page_sel not in st.session_state.page_tables:
+            st.session_state.page_tables[table_page_sel] = extract_tables_from_pdf(pdf_bytes, table_page_sel)
             
-            # --- Document-level Translation ---
-            with st.expander("🌐 Full Document Translation", expanded=False):
-                doc_trans_lang = st.selectbox("Target Translation Language", ["zh-cn", "zh-tw", "en", "ja", "fr", "de", "es"], key="doc_trans_lang")
-                if st.button("Translate Entire Document"):
-                    with st.spinner("Translating document..."):
+        tables = st.session_state.page_tables.get(table_page_sel, [])
+        if tables:
+            st.success(f"Found **{len(tables)}** table(s) on Page {table_page_sel + 1}.")
+            for t_idx, df in enumerate(tables):
+                with st.container(border=True):
+                    st.write(f"**Table #{t_idx + 1}**")
+                    st.dataframe(df, use_container_width=True)
+                    csv_bytes = df.to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        label=f"📥 Download Table #{t_idx + 1} as CSV",
+                        data=csv_bytes,
+                        file_name=f"page_{table_page_sel + 1}_table_{t_idx + 1}.csv",
+                        mime="text/csv",
+                        key=f"dl_tbl_{table_page_sel}_{t_idx}"
+                    )
+        else:
+            st.info(f"No structured tables detected on Page {table_page_sel + 1}.")
+
+    # --- TAB 4: AI TRANSLATION & AUDIO STUDIO ---
+    with tab_translate:
+        st.markdown("### Translation & Text-to-Speech Studio")
+        
+        col_trans, col_tts = st.columns(2, gap="medium")
+        
+        with col_trans:
+            with st.container(border=True):
+                st.subheader("🌐 AI Machine Translation")
+                trans_source_text = st.text_area("Text to Translate", value=st.session_state.extracted_full_text[:2000], height=200, key="trans_input")
+                target_lang = st.selectbox("Target Language", ["zh-cn", "zh-tw", "en", "ja", "fr", "de", "es"], key="studio_target_lang")
+                
+                if st.button("Translate Content", type="primary", key="btn_exec_trans"):
+                    with st.spinner("Translating via Google Translate API..."):
                         try:
                             translator = get_translator()
-                            translated_doc = translator.translate(st.session_state.extracted_full_text[:5000], dest=doc_trans_lang)
-                            st.text_area("Translated Document Preview (First 5000 chars)", value=translated_doc.text, height=250)
+                            res = translator.translate(trans_source_text, dest=target_lang)
+                            st.markdown(f"**Translated Output ({target_lang}):**")
+                            st.info(res.text)
                         except Exception as e:
-                            st.error(f"Full Document Translation Error: {e}")
+                            st.error(f"Translation Error: {e}")
 
-            # --- TTS Section ---
-            st.markdown("### 🔊 Listen to Extracted Text (TTS)")
-            tts_full_lang = st.selectbox("Select Speech Language", ["zh-CN", "en"], index=0, key="full_tts_lang")
-            
-            if st.button("Generate Audio for Full Document", key="btn_gen_full_audio"):
-                with st.spinner("Generating MP3 audio..."):
-                    try:
-                        full_audio_stream = generate_audio(st.session_state.extracted_full_text, tts_full_lang)
-                        audio_data = full_audio_stream.getvalue()
-                        
-                        st.audio(audio_data, format="audio/mp3")
-                        st.download_button(
-                            label="📥 Download Full Document Audio (.mp3)",
-                            data=audio_data,
-                            file_name="full_document_audio.mp3",
-                            mime="audio/mp3",
-                            key="btn_dl_full_audio"
-                        )
-                    except Exception as e:
-                        st.error(f"Full Document Audio Generation Error: {e}")
-
-            st.divider()
-
-            tab1, tab2 = st.tabs(["📝 Plain Text View", "📊 JSON Structure Preview"])
-            with tab1:
-                st.text_area(
-                    "Full Document Text Result",
-                    value=st.session_state.extracted_full_text,
-                    height=350,
-                    key="full_text_area"
-                )
-            with tab2:
-                json_string = json.dumps(st.session_state.structured_data, ensure_ascii=False, indent=4)
-                st.code(json_string, language="json")
+        with col_tts:
+            with st.container(border=True):
+                st.subheader("🔊 Audio Synthesis (TTS)")
+                tts_source_text = st.text_area("Text to Synthesize", value=st.session_state.extracted_full_text[:2000], height=200, key="tts_input")
+                tts_lang = st.selectbox("Speech Language", ["zh-CN", "en"], key="studio_tts_lang")
+                
+                if st.button("Generate MP3 Audio", type="primary", key="btn_exec_tts"):
+                    with st.spinner("Synthesizing speech audio..."):
+                        try:
+                            audio_stream = generate_audio(tts_source_text, tts_lang)
+                            audio_bytes = audio_stream.getvalue()
+                            
+                            st.audio(audio_bytes, format="audio/mp3")
+                            st.download_button(
+                                label="📥 Download Generated Audio (.mp3)",
+                                data=audio_bytes,
+                                file_name="studio_audio.mp3",
+                                mime="audio/mp3",
+                                use_container_width=True,
+                                key="btn_dl_studio_audio"
+                            )
+                        except Exception as e:
+                            st.error(f"TTS Audio Generation Error: {e}")
 
     pdf_document.close()
